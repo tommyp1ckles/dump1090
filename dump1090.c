@@ -93,6 +93,10 @@
 
 #define MODES_NOTUSED(V) ((void) V)
 
+#define XMLOUTPUTFILENAME "output.xml"
+char xml_mode;
+FILE *xml_file;
+
 /* Structure used to describe a networking client. */
 struct client {
     int fd;         /* File descriptor. */
@@ -124,7 +128,8 @@ struct aircraft {
 
 /* Program global state. */
 struct {
-    /* Internal state */
+	int xml_mode;    
+	/* Internal state */
     pthread_t reader_thread;
     pthread_mutex_t data_mutex;     /* Mutex to synchronize buffer access. */
     pthread_cond_t data_cond;       /* Conditional variable associated. */
@@ -184,6 +189,7 @@ struct {
     long long stat_http_requests;
     long long stat_sbs_connections;
     long long stat_out_of_phase;
+	
 } Modes;
 
 /* The struct we use to store information about a decoded message. */
@@ -351,8 +357,7 @@ void modesInitRTLSDR(void) {
     }
 
     if (rtlsdr_open(&Modes.dev, Modes.dev_index) < 0) {
-        fprintf(stderr, "Error opening the RTLSDR device: %s\n",
-            strerror(errno));
+        fprintf(stderr, "Error opening the RTLSDR device: %s\n", strerror(errno));
         exit(1);
     }
 
@@ -379,8 +384,7 @@ void modesInitRTLSDR(void) {
     rtlsdr_set_center_freq(Modes.dev, Modes.freq);
     rtlsdr_set_sample_rate(Modes.dev, MODES_DEFAULT_RATE);
     rtlsdr_reset_buffer(Modes.dev);
-    fprintf(stderr, "Gain reported by device: %.2f\n",
-        rtlsdr_get_tuner_gain(Modes.dev)/10.0);
+    fprintf(stderr, "Gain reported by device: %.2f\n", rtlsdr_get_tuner_gain(Modes.dev)/10.0);
 }
 
 /* We use a thread reading data in background, while the main thread
@@ -533,20 +537,20 @@ void dumpRawMessageJS(char *descr, unsigned char *msg,
     }
 
     if ((fp = fopen("frames.js","a")) == NULL) {
-        fprintf(stderr, "Error opening frames.js: %s\n", strerror(errno));
+        if (!xml_mode) fprintf(stderr, "Error opening frames.js: %s\n", strerror(errno));
         exit(1);
     }
 
-    fprintf(fp,"frames.push({\"descr\": \"%s\", \"mag\": [", descr);
+    if (!xml_mode) fprintf(fp,"frames.push({\"descr\": \"%s\", \"mag\": [", descr);
     for (j = start; j <= end; j++) {
-        fprintf(fp,"%d", j < 0 ? 0 : m[j]);
-        if (j != end) fprintf(fp,",");
+        if (!xml_mode) fprintf(fp,"%d", j < 0 ? 0 : m[j]);
+        if (j != end && !xml_mode) fprintf(fp,",");
     }
-    fprintf(fp,"], \"fix1\": %d, \"fix2\": %d, \"bits\": %d, \"hex\": \"",
+    if (!xml_mode) fprintf(fp,"], \"fix1\": %d, \"fix2\": %d, \"bits\": %d, \"hex\": \"",
         fix1, fix2, modesMessageLenByType(msg[0]>>3));
     for (j = 0; j < MODES_LONG_MSG_BYTES; j++)
-        fprintf(fp,"\\x%02x",msg[j]);
-    fprintf(fp,"\"});\n");
+        if (!xml_mode) fprintf(fp,"\\x%02x",msg[j]);
+    if (!xml_mode) fprintf(fp,"\"});\n");
     fclose(fp);
 }
 
@@ -1110,14 +1114,14 @@ void decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
 /* This function gets a decoded Mode S Message and prints it on the screen
  * in a human readable format. */
 void displayModesMessage(struct modesMessage *mm) {
-    int j;
-
+	int j;
     /* Handle only addresses mode first. */
     if (Modes.onlyaddr) {
         printf("%02x%02x%02x\n", mm->aa1, mm->aa2, mm->aa3);
         return;
     }
-
+	
+	if (!xml_mode) {
     /* Show the raw message. */
     printf("*");
     for (j = 0; j < mm->msgbits/8; j++) printf("%02x", mm->msg[j]);
@@ -1127,7 +1131,7 @@ void displayModesMessage(struct modesMessage *mm) {
         fflush(stdout); /* Provide data to the reader ASAP. */
         return; /* Enough for --raw mode */
     }
-
+	
     printf("CRC: %06x (%s)\n", (int)mm->crc, mm->crcok ? "ok" : "wrong");
     if (mm->errorbit != -1)
         printf("Single bit error fixed, bit %d\n", mm->errorbit);
@@ -1141,7 +1145,7 @@ void displayModesMessage(struct modesMessage *mm) {
     } else if (mm->msgtype == 4 || mm->msgtype == 20) {
         printf("DF %d: %s, Altitude Reply.\n", mm->msgtype,
             (mm->msgtype == 4) ? "Surveillance" : "Comm-B");
-        printf("  Flight Status  : %s\n", fs_str[mm->fs]);
+        printf("  ??Flight Status  : %s\n", fs_str[mm->fs]);
         printf("  DR             : %d\n", mm->dr);
         printf("  UM             : %d\n", mm->um);
         printf("  Altitude       : %d %s\n", mm->altitude,
@@ -1220,9 +1224,86 @@ void displayModesMessage(struct modesMessage *mm) {
                    "(decoding still not implemented).\n",
                 mm->msgtype);
     }
+	printf("|=============|\n");
+	}
+	else
+	{
+		/* need one of seconds since 1970 */
+		printf("<flight>\n"); /* flight id ? */
+		printf("	<time>%ld</time>\n", time(NULL));
+		printf("	<ICAO>%02x%02x%02x</ICAO>\n", mm->aa1, mm->aa2, mm->aa3);
+		printf("	<altitude>%d</altitude>\n", mm->altitude);
+		printf("	<unit>%s</units>\n", (mm->unit == MODES_UNIT_METERS) ? "meters" : "feet");
+		printf("	<DR>%d</DR>\n", mm->dr);
+		printf("	<UM>%d</UM>\n", mm->um);
+		printf("	<squawk>%d</squawk>\n", mm->identity);
+		printf("	<flight_status>%s</flight_status>\n", fs_str[mm->fs]);
+		printf("	<capability>%d (%s)</capability>\n", mm->ca, ca_str[mm->ca]);
+		printf("	<squitter_type>%d</squitter_type>\n", mm->metype);
+		printf("	<squitter_sub>%d</squitter_sub>\n", mm->mesub);
+		printf("	<squitter_name>%s</squitter_name>\n", getMEDescription(mm->metype,mm->mesub));
+		printf("	<identification>%s<identification>\n", mm->flight);	
+
+		printf("	<f_flag>%s</f_flag>\n", mm->fflag ? "odd" : "even");
+		printf("	<t_flag>%s</t_flag>\n", mm->tflag ? "UTC" : "non-UTC");
+		printf("	<altitude>%d<altitude>\n", mm->altitude);
+		printf("	<latitude>%d</latitude>\n", mm->raw_latitude);
+		printf("	<longitude>%d</longitude>\n", mm->raw_longitude);
+
+		printf("	<EW_direction>%d<EW_direction>\n", mm->ew_dir);
+		printf("	<EW_velocity>%d<EW_velocity>\n", mm->ew_velocity);
+
+		printf("	<NS_direction>%d<NS_direction>\n", mm->ew_dir);
+		printf("	<NS_velocity>%d<NS_velocity>\n", mm->ew_velocity);
+		
+		printf("	<vertical_rate_src>%d</vertical_rate_src>\n", mm->vert_rate_source);
+		printf("	<vertical_rate_sign>%d</vertical_rate_src>\n", mm->vert_rate_sign);
+		printf("	<vertical_rate>%d</vertical>\n", mm->vert_rate);
+		
+		printf("	<heading_status>%d</heading_status>\n", mm->heading_is_valid);
+		printf("	<heading>%d</heading>\n", mm->heading);
+		printf("</flight>\n");
+	
+		fprintf(xml_file, "<flight>\n"); /* flight id ? */
+		fprintf(xml_file,"	<time>%ld</time>\n", time(NULL));
+		fprintf(xml_file,"	<ICAO>%02x%02x%02x</ICAO>\n", mm->aa1, mm->aa2, mm->aa3);
+		fprintf(xml_file,"	<altitude>%d</altitude>\n", mm->altitude);
+		fprintf(xml_file,"	<unit>%s</units>\n", (mm->unit == MODES_UNIT_METERS) ? "meters" : "feet");
+		fprintf(xml_file,"	<DR>%d</DR>\n", mm->dr);
+		fprintf(xml_file,"	<UM>%d</UM>\n", mm->um);
+		fprintf(xml_file,"	<squawk>%d</squawk>\n", mm->identity);
+		fprintf(xml_file,"	<flight_status>%s</flight_status>\n", fs_str[mm->fs]);
+		fprintf(xml_file,"	<capability>%d (%s)</capability>\n", mm->ca, ca_str[mm->ca]);
+		fprintf(xml_file,"	<squitter_type>%d</squitter_type>\n", mm->metype);
+		fprintf(xml_file,"	<squitter_sub>%d</squitter_sub>\n", mm->mesub);
+		fprintf(xml_file,"	<squitter_name>%s</squitter_name>\n", getMEDescription(mm->metype,mm->mesub));
+		fprintf(xml_file,"	<identification>%s<identification>\n", mm->flight);	
+
+		fprintf(xml_file,"	<f_flag>%s</f_flag>\n", mm->fflag ? "odd" : "even");
+		fprintf(xml_file,"	<t_flag>%s</t_flag>\n", mm->tflag ? "UTC" : "non-UTC");
+		fprintf(xml_file,"	<altitude>%d<altitude>\n", mm->altitude);
+		fprintf(xml_file,"	<latitude>%d</latitude>\n", mm->raw_latitude);
+		fprintf(xml_file,"	<longitude>%d</longitude>\n", mm->raw_longitude);
+
+		fprintf(xml_file,"	<EW_direction>%d<EW_direction>\n", mm->ew_dir);
+		fprintf(xml_file,"	<EW_velocity>%d<EW_velocity>\n", mm->ew_velocity);
+
+		fprintf(xml_file,"	<NS_direction>%d<NS_direction>\n", mm->ew_dir);
+		fprintf(xml_file,"	<NS_velocity>%d<NS_velocity>\n", mm->ew_velocity);
+		
+		fprintf(xml_file,"	<vertical_rate_src>%d</vertical_rate_src>\n", mm->vert_rate_source);
+		fprintf(xml_file,"	<vertical_rate_sign>%d</vertical_rate_src>\n", mm->vert_rate_sign);
+		fprintf(xml_file,"	<vertical_rate>%d</vertical>\n", mm->vert_rate);
+		
+		fprintf(xml_file,"	<heading_status>%d</heading_status>\n", mm->heading_is_valid);
+		fprintf(xml_file,"	<heading>%d</heading>\n", mm->heading);
+		fprintf(xml_file,"</flight>\n");
+	}
 }
 
 /* Turn I/Q samples pointed by Modes.data into the magnitude vector
+		irintf("<%ld\n", time(NULL))
+		irintf("<aircraft_type>%s</aircraft_type>\n", ac_type_str[mm->aircraft_type]);
  * pointed by Modes.magnitude. */
 void computeMagnitudeVector(void) {
     uint16_t *m = Modes.magnitude;
@@ -1938,7 +2019,7 @@ void modesAcceptClients(void) {
                            NULL, &port);
         if (fd == -1) {
             if (Modes.debug & MODES_DEBUG_NET && errno != EAGAIN)
-                printf("Accept %d: %s\n", *modesNetServices[j].socket,
+                if (!xml_mode) printf("Accept %d: %s\n", *modesNetServices[j].socket,
                        strerror(errno));
             continue;
         }
@@ -2536,7 +2617,7 @@ int main(int argc, char **argv) {
                 case 'n': Modes.debug |= MODES_DEBUG_NET; break;
                 case 'j': Modes.debug |= MODES_DEBUG_JS; break;
                 default:
-                    fprintf(stderr, "Unknown debugging flag: %c\n", *f);
+                    if (!xml_mode) fprintf(stderr, "Unknown debugging flag: %c\n", *f);
                     exit(1);
                     break;
                 }
@@ -2550,22 +2631,28 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[j],"--help")) {
             showHelp();
             exit(0);
-        } else {
-            fprintf(stderr,
+       	}
+		else if (!strcmp(argv[j],"--xml")) 
+		{
+			xml_mode = 1;
+			xml_file = fopen("output.xml", "a+");
+			fprintf(xml_file,"<?xml version=\"1.0\"?>\n");
+		}
+		else {
+            if (!xml_mode) fprintf(stderr,
                 "Unknown or not enough arguments for option '%s'.\n\n",
                 argv[j]);
             showHelp();
             exit(1);
         }
     }
-
     /* Setup for SIGWINCH for handling lines */
     if (Modes.interactive == 1) signal(SIGWINCH, sigWinchCallback);
 
     /* Initialization */
     modesInit();
     if (Modes.net_only) {
-        fprintf(stderr,"Net-only mode, no RTL device or file open.\n");
+        if (!xml_mode) fprintf(stderr,"Net-only mode, no RTL device or file open.\n");
     } else if (Modes.filename == NULL) {
         modesInitRTLSDR();
     } else {
