@@ -95,6 +95,7 @@
 
 #define XMLOUTPUTFILENAME "output.xml"
 char xml_mode;
+char xml_modef;
 FILE *xml_file;
 
 /* Structure used to describe a networking client. */
@@ -1226,7 +1227,7 @@ void displayModesMessage(struct modesMessage *mm) {
     }
 	printf("|=============|\n");
 	}
-	else
+	else if (xml_mode)
 	{
 		/* need one of seconds since 1970 */
 		printf("<flight>\n"); /* flight id ? */
@@ -1242,7 +1243,7 @@ void displayModesMessage(struct modesMessage *mm) {
 		printf("	<squitter_type>%d</squitter_type>\n", mm->metype);
 		printf("	<squitter_sub>%d</squitter_sub>\n", mm->mesub);
 		printf("	<squitter_name>%s</squitter_name>\n", getMEDescription(mm->metype,mm->mesub));
-		printf("	<identification>%s<identification>\n", mm->flight);	
+		printf("	<identification>%s</identification>\n", mm->flight);	
 
 		printf("	<f_flag>%s</f_flag>\n", mm->fflag ? "odd" : "even");
 		printf("	<t_flag>%s</t_flag>\n", mm->tflag ? "UTC" : "non-UTC");
@@ -1250,11 +1251,11 @@ void displayModesMessage(struct modesMessage *mm) {
 		printf("	<latitude>%d</latitude>\n", mm->raw_latitude);
 		printf("	<longitude>%d</longitude>\n", mm->raw_longitude);
 
-		printf("	<EW_direction>%d<EW_direction>\n", mm->ew_dir);
-		printf("	<EW_velocity>%d<EW_velocity>\n", mm->ew_velocity);
+		printf("	<EW_direction>%d</EW_direction>\n", mm->ew_dir);
+		printf("	<EW_velocity>%d</EW_velocity>\n", mm->ew_velocity);
 
-		printf("	<NS_direction>%d<NS_direction>\n", mm->ew_dir);
-		printf("	<NS_velocity>%d<NS_velocity>\n", mm->ew_velocity);
+		printf("	<NS_direction>%d</NS_direction>\n", mm->ew_dir);
+		printf("	<NS_velocity>%d</NS_velocity>\n", mm->ew_velocity);
 		
 		printf("	<vertical_rate_src>%d</vertical_rate_src>\n", mm->vert_rate_source);
 		printf("	<vertical_rate_sign>%d</vertical_rate_src>\n", mm->vert_rate_sign);
@@ -1263,7 +1264,9 @@ void displayModesMessage(struct modesMessage *mm) {
 		printf("	<heading_status>%d</heading_status>\n", mm->heading_is_valid);
 		printf("	<heading>%d</heading>\n", mm->heading);
 		printf("</flight>\n");
-	
+	}
+	else if (xml_modef)
+	{
 		fprintf(xml_file, "<flight>\n"); /* flight id ? */
 		fprintf(xml_file,"	<time>%ld</time>\n", time(NULL));
 		fprintf(xml_file,"	<ICAO>%02x%02x%02x</ICAO>\n", mm->aa1, mm->aa2, mm->aa3);
@@ -1277,7 +1280,7 @@ void displayModesMessage(struct modesMessage *mm) {
 		fprintf(xml_file,"	<squitter_type>%d</squitter_type>\n", mm->metype);
 		fprintf(xml_file,"	<squitter_sub>%d</squitter_sub>\n", mm->mesub);
 		fprintf(xml_file,"	<squitter_name>%s</squitter_name>\n", getMEDescription(mm->metype,mm->mesub));
-		fprintf(xml_file,"	<identification>%s<identification>\n", mm->flight);	
+		fprintf(xml_file,"	<identification>%s</identification>\n", mm->flight);	
 
 		fprintf(xml_file,"	<f_flag>%s</f_flag>\n", mm->fflag ? "odd" : "even");
 		fprintf(xml_file,"	<t_flag>%s</t_flag>\n", mm->tflag ? "UTC" : "non-UTC");
@@ -1285,11 +1288,11 @@ void displayModesMessage(struct modesMessage *mm) {
 		fprintf(xml_file,"	<latitude>%d</latitude>\n", mm->raw_latitude);
 		fprintf(xml_file,"	<longitude>%d</longitude>\n", mm->raw_longitude);
 
-		fprintf(xml_file,"	<EW_direction>%d<EW_direction>\n", mm->ew_dir);
-		fprintf(xml_file,"	<EW_velocity>%d<EW_velocity>\n", mm->ew_velocity);
+		fprintf(xml_file,"	<EW_direction>%d</EW_direction>\n", mm->ew_dir);
+		fprintf(xml_file,"	<EW_velocity>%d</EW_velocity>\n", mm->ew_velocity);
 
-		fprintf(xml_file,"	<NS_direction>%d<NS_direction>\n", mm->ew_dir);
-		fprintf(xml_file,"	<NS_velocity>%d<NS_velocity>\n", mm->ew_velocity);
+		fprintf(xml_file,"	<NS_direction>%d</NS_direction>\n", mm->ew_dir);
+		fprintf(xml_file,"	<NS_velocity>%d</NS_velocity>\n", mm->ew_velocity);
 		
 		fprintf(xml_file,"	<vertical_rate_src>%d</vertical_rate_src>\n", mm->vert_rate_source);
 		fprintf(xml_file,"	<vertical_rate_sign>%d</vertical_rate_src>\n", mm->vert_rate_sign);
@@ -2632,11 +2635,14 @@ int main(int argc, char **argv) {
             showHelp();
             exit(0);
        	}
-		else if (!strcmp(argv[j],"--xml")) 
+		else if (!strcmp(argv[j],"--xml"))
 		{
 			xml_mode = 1;
+		}
+		else if (!strcmp(argv[j],"--xmlf")) 
+		{
+			xml_modef = 1;
 			xml_file = fopen("output.xml", "a+");
-			fprintf(xml_file,"<?xml version=\"1.0\"?>\n");
 		}
 		else {
             if (!xml_mode) fprintf(stderr,
@@ -2645,6 +2651,7 @@ int main(int argc, char **argv) {
             showHelp();
             exit(1);
         }
+
     }
     /* Setup for SIGWINCH for handling lines */
     if (Modes.interactive == 1) signal(SIGWINCH, sigWinchCallback);
