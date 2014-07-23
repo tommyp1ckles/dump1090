@@ -127,6 +127,7 @@ struct aircraft {
     struct aircraft *next; /* Next aircraft in our linked list. */
 };
 
+
 /* Program global state. */
 struct {
 	int xml_mode;    
@@ -223,7 +224,7 @@ struct modesMessage {
     int ew_velocity;            /* E/W velocity. */
     int ns_dir;                 /* 0 = North, 1 = South. */
     int ns_velocity;            /* N/S velocity. */
-    int vert_rate_source;       /* Vertical rate source. */
+    int vert_rate_source;       /* Vertical rate source . */
     int vert_rate_sign;         /* Vertical rate sign. */
     int vert_rate;              /* Vertical rate. */
     int velocity;               /* Computed from EW and NS velocity. */
@@ -237,6 +238,29 @@ struct modesMessage {
     /* Fields used by multiple message types. */
     int altitude, unit;
 };
+
+struct aircraft *interactiveCreateAircraft(uint32_t addr) {
+    struct aircraft *a = malloc(sizeof(*a));
+
+    a->addr = addr;
+    snprintf(a->hexaddr,sizeof(a->hexaddr),"%06x",(int)addr);
+    a->flight[0] = '\0';
+    a->altitude = 0;
+    a->speed = 0;
+    a->track = 0;
+    a->odd_cprlat = 0;
+    a->odd_cprlon = 0;
+    a->odd_cprtime = 0;
+    a->even_cprlat = 0;
+    a->even_cprlon = 0;
+    a->even_cprtime = 0;
+    a->lat = 0;
+    a->lon = 0;
+    a->seen = time(NULL);
+    a->messages = 0;
+    a->next = NULL;
+    return a;
+}
 
 void interactiveShowData(void);
 struct aircraft* interactiveReceiveData(struct modesMessage *mm);
@@ -337,6 +361,7 @@ void modesInit(void) {
 }
 
 /* =============================== RTLSDR handling ========================== */
+void decodeCPR(struct aircraft *a);
 
 void modesInitRTLSDR(void) {
     int j;
@@ -1116,8 +1141,40 @@ void decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
  * in a human readable format. */
 void displayModesMessage(struct modesMessage *mm) {
 	int j;
-    /* Handle only addresses mode first. */
-    if (Modes.onlyaddr) {
+	/* Handle only addresses mode first. */
+	
+	struct aircraft *a = malloc(sizeof(*a));
+	if (mm->msgtype == 0 || mm->msgtype == 4 || mm->msgtype == 20) {
+        a->altitude = mm->altitude;
+    } else if (mm->msgtype == 17) {
+        if (mm->metype >= 1 && mm->metype <= 4) {
+            memcpy(a->flight, mm->flight, sizeof(a->flight));
+        } else if (mm->metype >= 9 && mm->metype <= 18) {
+            a->altitude = mm->altitude;
+            if (mm->fflag) {
+                a->odd_cprlat = mm->raw_latitude;
+                a->odd_cprlon = mm->raw_longitude;
+                a->odd_cprtime = mstime();
+            } else {
+                a->even_cprlat = mm->raw_latitude;
+                a->even_cprlon = mm->raw_longitude;
+                a->even_cprtime = mstime();
+            }
+            /* If the two data is less than 10 seconds apart, compute
+             * the position. */
+            if (abs(a->even_cprtime - a->odd_cprtime) <= 10000) {
+                decodeCPR(a);
+            }
+        } else if (mm->metype == 19) {
+            if (mm->mesub == 1 || mm->mesub == 2) {
+                a->speed = mm->velocity;
+                a->track = mm->heading;
+            }
+        }
+    }
+	
+
+	if (Modes.onlyaddr) {
         printf("%02x%02x%02x\n", mm->aa1, mm->aa2, mm->aa3);
         return;
     }
@@ -1248,8 +1305,8 @@ void displayModesMessage(struct modesMessage *mm) {
 		printf("	<f_flag>%s</f_flag>\n", mm->fflag ? "odd" : "even");
 		printf("	<t_flag>%s</t_flag>\n", mm->tflag ? "UTC" : "non-UTC");
 		printf("	<altitude>%d<altitude>\n", mm->altitude);
-		printf("	<latitude>%d</latitude>\n", mm->raw_latitude);
-		printf("	<longitude>%d</longitude>\n", mm->raw_longitude);
+		printf("	<latitude>%d</latitude>\n", a->odd_cprlat);
+		printf("	<longitude>%d</longitude>\n", a->odd_cprlon);
 
 		printf("	<EW_direction>%d</EW_direction>\n", mm->ew_dir);
 		printf("	<EW_velocity>%d</EW_velocity>\n", mm->ew_velocity);
@@ -1647,28 +1704,8 @@ void useModesMessage(struct modesMessage *mm) {
 
 /* Return a new aircraft structure for the interactive mode linked list
  * of aircrafts. */
-struct aircraft *interactiveCreateAircraft(uint32_t addr) {
-    struct aircraft *a = malloc(sizeof(*a));
 
-    a->addr = addr;
-    snprintf(a->hexaddr,sizeof(a->hexaddr),"%06x",(int)addr);
-    a->flight[0] = '\0';
-    a->altitude = 0;
-    a->speed = 0;
-    a->track = 0;
-    a->odd_cprlat = 0;
-    a->odd_cprlon = 0;
-    a->odd_cprtime = 0;
-    a->even_cprlat = 0;
-    a->even_cprlon = 0;
-    a->even_cprtime = 0;
-    a->lat = 0;
-    a->lon = 0;
-    a->seen = time(NULL);
-    a->messages = 0;
-    a->next = NULL;
-    return a;
-}
+/*Moved to top of file*/
 
 /* Return the aircraft with the specified address, or NULL if no aircraft
  * exists with this address. */
@@ -1840,8 +1877,8 @@ struct aircraft *interactiveReceiveData(struct modesMessage *mm) {
             aux->next = aux->next->next; /* removed. */
             /* Add on head */
             a->next = Modes.aircrafts;
-            Modes.aircrafts = a;
         }
+            Modes.aircrafts = a;
     }
 
     a->seen = time(NULL);
