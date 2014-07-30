@@ -1305,9 +1305,15 @@ void displayModesMessage(struct modesMessage *mm) {
 		printf("	<f_flag>%s</f_flag>\n", mm->fflag ? "odd" : "even");
 		printf("	<t_flag>%s</t_flag>\n", mm->tflag ? "UTC" : "non-UTC");
 		printf("	<altitude>%d<altitude>\n", mm->altitude);
-		printf("	<latitude>%d</latitude>\n", a->odd_cprlat);
-		printf("	<longitude>%d</longitude>\n", a->odd_cprlon);
 
+		printf("	<odd_latitude>%d</odd_latitude>\n", a->odd_cprlat);
+		printf("	<odd_longitude>%d</odd_longitude>\n", a->odd_cprlon);
+
+		
+		printf("	<even_latitude>%d</even_latitude>\n", a->even_cprlat);
+		printf("	<even_longitude>%d</even_longitude>\n", a->even_cprlon);
+
+		
 		printf("	<EW_direction>%d</EW_direction>\n", mm->ew_dir);
 		printf("	<EW_velocity>%d</EW_velocity>\n", mm->ew_velocity);
 
